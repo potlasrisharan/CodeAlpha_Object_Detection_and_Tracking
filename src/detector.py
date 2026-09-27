@@ -81,8 +81,13 @@ class ObjectDetector:
 
         return detections
 
-    def track(self, frame: np.ndarray, persist: bool = True) -> List[Detection]:
-        """Run inference with persistent multi-object tracking (ByteTrack / BoT-SORT)."""
+    def track(
+        self,
+        frame: np.ndarray,
+        persist: bool = True,
+        tracker_algorithm: str = "botsort.yaml",
+    ) -> List[Detection]:
+        """Run inference with persistent multi-object tracking (Deep SORT / ByteTrack)."""
         results = self.model.track(
             source=frame,
             conf=self.confidence_threshold,
@@ -90,7 +95,7 @@ class ObjectDetector:
             persist=persist,
             device=self.device,
             verbose=False,
-            tracker="bytetrack.yaml",
+            tracker=tracker_algorithm,
         )
 
         detections: List[Detection] = []

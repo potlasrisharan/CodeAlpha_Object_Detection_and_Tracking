@@ -11,7 +11,7 @@ import streamlit as st
 from PIL import Image
 
 from src.detector import ObjectDetector
-from src.tracker import TrajectoryTracker
+from src.tracker import TrajectoryTracker, SortTracker
 from src.visualizer import FrameVisualizer
 from src.utils import FPSCalculator, generate_synthetic_demo_video
 
@@ -170,6 +170,13 @@ iou_threshold = st.sidebar.slider(
     step=0.05,
 )
 
+tracker_choice = st.sidebar.selectbox(
+    "Tracking Algorithm",
+    options=["Deep SORT (BoT-SORT)", "ByteTrack", "Classic SORT"],
+    index=0,
+    help="Select tracking algorithm: Deep SORT, ByteTrack, or Classic SORT",
+)
+
 show_trajectories = st.sidebar.checkbox("Render Trajectory Trails", value=True)
 show_hud_overlay = st.sidebar.checkbox("Overlay HUD Stats on Video", value=True)
 
@@ -196,8 +203,17 @@ detector.confidence_threshold = conf_threshold
 detector.iou_threshold = iou_threshold
 
 tracker = TrajectoryTracker(max_trajectory_length=40)
+sort_engine = SortTracker(iou_threshold=iou_threshold)
 visualizer = FrameVisualizer(show_trajectories=show_trajectories, show_hud=show_hud_overlay)
 fps_calc = FPSCalculator()
+
+tracker_yaml = "botsort.yaml" if "Deep SORT" in tracker_choice else "bytetrack.yaml"
+
+def run_tracking_inference(frame: np.ndarray):
+    if tracker_choice == "Classic SORT":
+        raw_dets = detector.detect(frame)
+        return sort_engine.update(raw_dets)
+    return detector.track(frame, persist=True, tracker_algorithm=tracker_yaml)
 
 # Layout: Split View (Main Stream on left / Telemetry metrics & log on right)
 col_stream, col_metrics = st.columns([1.5, 1], gap="medium")
@@ -279,7 +295,7 @@ if source_mode == "Browser Webcam (In-Browser Capture)":
         img_bytes = camera_photo.getvalue()
         cv_img = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
         fps = 30.0
-        detections = detector.track(cv_img, persist=True)
+        detections = run_tracking_inference(cv_img)
         tracker.update(detections)
         annotated = visualizer.draw(cv_img, detections, tracker, fps)
         frame_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
@@ -354,7 +370,7 @@ elif st.session_state.is_running:
                 continue
 
             fps = fps_calc.tick()
-            detections = detector.track(frame, persist=True)
+            detections = run_tracking_inference(frame)
             tracker.update(detections)
 
             annotated = visualizer.draw(frame, detections, tracker, fps)

@@ -5,18 +5,25 @@ import sys
 from pathlib import Path
 import cv2
 from src.detector import ObjectDetector
-from src.tracker import TrajectoryTracker
+from src.tracker import TrajectoryTracker, SortTracker
 from src.visualizer import FrameVisualizer
 from src.utils import FPSCalculator, generate_synthetic_demo_video
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Real-Time Object Detection & Tracking with YOLOv8 & ByteTrack")
+    parser = argparse.ArgumentParser(description="Real-Time Object Detection & Tracking with YOLOv8 & Deep SORT / ByteTrack / SORT")
     parser.add_argument(
         "--source",
         type=str,
-        default="demo",
+        default="sample_feed.mp4",
         help="Input source: '0' for webcam, path to video file, or 'demo' for synthetic traffic simulation",
+    )
+    parser.add_argument(
+        "--tracker",
+        type=str,
+        default="botsort",
+        choices=["botsort", "bytetrack", "sort"],
+        help="Tracking algorithm: 'botsort' (Deep SORT), 'bytetrack', or 'sort'",
     )
     parser.add_argument(
         "--model",
@@ -97,8 +104,11 @@ def main():
     tracker = TrajectoryTracker(max_trajectory_length=40)
     visualizer = FrameVisualizer(show_trajectories=not args.no_trajectories, show_hud=True)
     fps_calc = FPSCalculator()
+    sort_engine = SortTracker(iou_threshold=args.iou)
+    tracker_yaml = f"{args.tracker}.yaml" if args.tracker in ["botsort", "bytetrack"] else "botsort.yaml"
 
     print(f"[INFO] Running on compute accelerator: {detector.device.upper()}")
+    print(f"[INFO] Active tracking algorithm: {args.tracker.upper()}")
     print("[INFO] Press 'q' inside video window to exit.")
 
     try:
@@ -112,7 +122,12 @@ def main():
                 break
 
             fps = fps_calc.tick()
-            detections = detector.track(frame, persist=True)
+            if args.tracker == "sort":
+                raw_dets = detector.detect(frame)
+                detections = sort_engine.update(raw_dets)
+            else:
+                detections = detector.track(frame, persist=True, tracker_algorithm=tracker_yaml)
+
             tracker.update(detections)
 
             annotated_frame = visualizer.draw(frame, detections, tracker, fps)

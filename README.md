@@ -9,6 +9,13 @@ An autonomous, hardware-accelerated computer vision application for real-time mu
 - **Telemetry UI & CLI:** Built-in Streamlit web telemetry cockpit and standalone OpenCV CLI runner.
 - **Anti-Slop Design System:** Built adhering to custom design guidelines documented in `DESIGN.md`.
 
+## CodeAlpha Task 4 Compliance
+- **Video Input:** Real-time video input via live webcam (`0`), video files, or bundled benchmark feed via OpenCV.
+- **Pretrained Detection:** YOLOv8 deep learning network (Nano/Small) with MPS, CUDA, and CPU hardware acceleration.
+- **Frame Processing & Bounding Boxes:** Real-time frame processing with calibrated bounding boxes and pill badges.
+- **Tracking Algorithms:** Support for both **Deep SORT (BoT-SORT)**, **ByteTrack**, and classic **SORT** (IOU Hungarian association).
+- **Real-time Telemetry:** Output with class labels, persistent tracking IDs, trajectory trail lines, and live FPS telemetry.
+
 ---
 
 ## Architecture Flow
