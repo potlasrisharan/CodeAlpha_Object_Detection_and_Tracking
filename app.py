@@ -172,9 +172,9 @@ iou_threshold = st.sidebar.slider(
 
 tracker_choice = st.sidebar.selectbox(
     "Tracking Algorithm",
-    options=["Deep SORT (BoT-SORT)", "ByteTrack", "Classic SORT"],
+    options=["ByteTrack (Recommended)", "Deep SORT (BoT-SORT)", "Classic SORT"],
     index=0,
-    help="Select tracking algorithm: Deep SORT, ByteTrack, or Classic SORT",
+    help="Select tracking algorithm: ByteTrack, Deep SORT, or Classic SORT",
 )
 
 show_trajectories = st.sidebar.checkbox("Render Trajectory Trails", value=True)
@@ -361,6 +361,7 @@ elif st.session_state.is_running:
 
     if video_cap is not None and video_cap.isOpened():
         tracker.reset()
+        frame_idx = 0
 
         while st.session_state.is_running and video_cap.isOpened():
             ret, frame = video_cap.read()
@@ -369,6 +370,7 @@ elif st.session_state.is_running:
                 video_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 continue
 
+            frame_idx += 1
             fps = fps_calc.tick()
             detections = run_tracking_inference(frame)
             tracker.update(detections)
@@ -378,52 +380,53 @@ elif st.session_state.is_running:
 
             video_placeholder.image(frame_rgb, use_container_width=True)
 
-            # Live Telemetry
-            fps_metric.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-label">Inference FPS</div>
-                    <div class="metric-val" style="color: #10b981;">{fps:.1f}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            # Throttle DOM and metric updates every 8 frames to prevent WebSocket backlog
+            if frame_idx % 8 == 0:
+                fps_metric.markdown(
+                    f"""
+                    <div class="metric-card">
+                        <div class="metric-label">Inference FPS</div>
+                        <div class="metric-val" style="color: #10b981;">{fps:.1f}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-            active_count = tracker.get_active_count()
-            active_metric.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-label">Active Tracks</div>
-                    <div class="metric-val">{active_count}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                active_count = tracker.get_active_count()
+                active_metric.markdown(
+                    f"""
+                    <div class="metric-card">
+                        <div class="metric-label">Active Tracks</div>
+                        <div class="metric-val">{active_count}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-            unique_count = len(tracker.tracks)
-            unique_metric.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-label">Total Unique Objects</div>
-                    <div class="metric-val">{unique_count}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                unique_count = len(tracker.tracks)
+                unique_metric.markdown(
+                    f"""
+                    <div class="metric-card">
+                        <div class="metric-label">Total Unique Objects</div>
+                        <div class="metric-val">{unique_count}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-            if detections:
-                data = [
-                    {
-                        "Track ID": f"#{d.track_id}" if d.track_id is not None else "Unassigned",
-                        "Class": d.class_name,
-                        "Confidence": f"{d.confidence * 100:.1f}%",
-                        "Coordinates": f"({d.box[0]}, {d.box[1]}) -> ({d.box[2]}, {d.box[3]})",
-                    }
-                    for d in detections[:8]
-                ]
-                table_placeholder.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
+                if detections:
+                    data = [
+                        {
+                            "Track ID": f"#{d.track_id}" if d.track_id is not None else "Unassigned",
+                            "Class": d.class_name,
+                            "Confidence": f"{d.confidence * 100:.1f}%",
+                            "Coordinates": f"({d.box[0]}, {d.box[1]}) -> ({d.box[2]}, {d.box[3]})",
+                        }
+                        for d in detections[:8]
+                    ]
+                    table_placeholder.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
 
-            time.sleep(0.01)
+            time.sleep(0.025)
 
         video_cap.release()
 else:
