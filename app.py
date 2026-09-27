@@ -1,5 +1,6 @@
 """Streamlit Telemetry Dashboard for Real-Time Object Detection & Tracking."""
 
+import os
 import tempfile
 import time
 from pathlib import Path
@@ -157,7 +158,7 @@ conf_threshold = st.sidebar.slider(
     "Confidence Threshold",
     min_value=0.10,
     max_value=0.95,
-    value=0.40,
+    value=0.35,
     step=0.05,
 )
 
@@ -176,7 +177,12 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("### Video Stream Input")
 source_mode = st.sidebar.radio(
     "Select Input Source",
-    options=["Synthetic Traffic Demo", "Upload Video File", "Live Camera"],
+    options=[
+        "Benchmark Video Feed (Recommended)",
+        "Browser Webcam (In-Browser Capture)",
+        "Upload Video File",
+        "Local Device Camera (OpenCV)",
+    ],
     index=0,
 )
 
@@ -186,7 +192,6 @@ def load_detector(model_name: str, conf: float, iou: float):
     return ObjectDetector(model_name=model_name, confidence_threshold=conf, iou_threshold=iou)
 
 detector = load_detector(model_choice, conf_threshold, iou_threshold)
-# Update thresholds dynamically
 detector.confidence_threshold = conf_threshold
 detector.iou_threshold = iou_threshold
 
@@ -194,31 +199,16 @@ tracker = TrajectoryTracker(max_trajectory_length=40)
 visualizer = FrameVisualizer(show_trajectories=show_trajectories, show_hud=show_hud_overlay)
 fps_calc = FPSCalculator()
 
-# Input source handling
-video_cap = None
-temp_file_path = None
-
-if source_mode == "Synthetic Traffic Demo":
-    demo_path = generate_synthetic_demo_video("sample_traffic.mp4")
-    video_cap = cv2.VideoCapture(demo_path)
-elif source_mode == "Upload Video File":
-    uploaded = st.sidebar.file_uploader("Upload video file (mp4, mov, avi)", type=["mp4", "mov", "avi"])
-    if uploaded is not None:
-        tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-        tfile.write(uploaded.read())
-        temp_file_path = tfile.name
-        video_cap = cv2.VideoCapture(temp_file_path)
-    else:
-        st.info("Upload a video file from the sidebar to start inference.")
-elif source_mode == "Live Camera":
-    video_cap = cv2.VideoCapture(0)
-
 # Layout: Split View (Main Stream on left / Telemetry metrics & log on right)
 col_stream, col_metrics = st.columns([1.5, 1], gap="medium")
 
 with col_stream:
     video_placeholder = st.empty()
-    run_btn = st.button("Start Telemetry Stream")
+    action_cols = st.columns([1, 1])
+    with action_cols[0]:
+        start_btn = st.button("Start Inference Stream", use_container_width=True)
+    with action_cols[1]:
+        stop_btn = st.button("Stop Stream", use_container_width=True)
 
 with col_metrics:
     m_col1, m_col2 = st.columns(2)
@@ -246,62 +236,73 @@ device_metric.markdown(
     """,
     unsafe_allow_html=True,
 )
+fps_metric.markdown(
+    """
+    <div class="metric-card">
+        <div class="metric-label">Inference FPS</div>
+        <div class="metric-val" style="color: #10b981;">0.0</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+active_metric.markdown(
+    """
+    <div class="metric-card">
+        <div class="metric-label">Active Tracks</div>
+        <div class="metric-val">0</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+unique_metric.markdown(
+    """
+    <div class="metric-card">
+        <div class="metric-label">Total Unique Objects</div>
+        <div class="metric-val">0</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-if run_btn and video_cap is not None:
-    tracker.reset()
-    stop_btn = st.sidebar.button("Stop Inference Stream")
+if "is_running" not in st.session_state:
+    st.session_state.is_running = False
 
-    while video_cap.isOpened():
-        ret, frame = video_cap.read()
-        if not ret:
-            if source_mode == "Synthetic Traffic Demo":
-                video_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                continue
-            break
+if start_btn:
+    st.session_state.is_running = True
+if stop_btn:
+    st.session_state.is_running = False
 
-        fps = fps_calc.tick()
-        detections = detector.track(frame, persist=True)
+# Mode 1: Browser Webcam Snapshot
+if source_mode == "Browser Webcam (In-Browser Capture)":
+    camera_photo = st.camera_input("Capture frame from browser camera")
+    if camera_photo is not None:
+        img_bytes = camera_photo.getvalue()
+        cv_img = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
+        fps = 30.0
+        detections = detector.track(cv_img, persist=True)
         tracker.update(detections)
-
-        annotated = visualizer.draw(frame, detections, tracker, fps)
+        annotated = visualizer.draw(cv_img, detections, tracker, fps)
         frame_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
-
         video_placeholder.image(frame_rgb, use_container_width=True)
 
-        # Update Live Telemetry Metrics
-        fps_metric.markdown(
-            f"""
-            <div class="metric-card">
-                <div class="metric-label">Inference FPS</div>
-                <div class="metric-val" style="color: #10b981;">{fps:.1f}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        active_count = tracker.get_active_count()
-        active_metric.markdown(
-            f"""
-            <div class="metric-card">
-                <div class="metric-label">Active Tracks</div>
-                <div class="metric-val">{active_count}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        unique_count = len(tracker.tracks)
         unique_metric.markdown(
             f"""
             <div class="metric-card">
                 <div class="metric-label">Total Unique Objects</div>
-                <div class="metric-val">{unique_count}</div>
+                <div class="metric-val">{len(tracker.tracks)}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-
-        # Update detection log
+        active_metric.markdown(
+            f"""
+            <div class="metric-card">
+                <div class="metric-label">Active Tracks</div>
+                <div class="metric-val">{len(detections)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         if detections:
             data = [
                 {
@@ -310,11 +311,112 @@ if run_btn and video_cap is not None:
                     "Confidence": f"{d.confidence * 100:.1f}%",
                     "Coordinates": f"({d.box[0]}, {d.box[1]}) -> ({d.box[2]}, {d.box[3]})",
                 }
-                for d in detections[:8]
+                for d in detections
             ]
-            df = pd.DataFrame(data)
-            table_placeholder.dataframe(df, use_container_width=True, hide_index=True)
+            table_placeholder.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
 
-        time.sleep(0.01)
+# Mode 2, 3, 4: Video streams
+elif st.session_state.is_running:
+    video_source_path = None
+    video_cap = None
 
-    video_cap.release()
+    if source_mode == "Benchmark Video Feed (Recommended)":
+        bench_path = Path("sample_feed.mp4")
+        if not bench_path.exists():
+            bench_path = Path(generate_synthetic_demo_video("sample_traffic.mp4"))
+        video_cap = cv2.VideoCapture(str(bench_path.resolve()))
+
+    elif source_mode == "Upload Video File":
+        uploaded = st.sidebar.file_uploader("Upload video file (mp4, mov, avi)", type=["mp4", "mov", "avi"])
+        if uploaded is not None:
+            tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+            tfile.write(uploaded.read())
+            video_cap = cv2.VideoCapture(tfile.name)
+        else:
+            st.info("Upload a video file from the sidebar to begin processing.")
+
+    elif source_mode == "Local Device Camera (OpenCV)":
+        # Disable macOS AVFoundation authorization crash
+        os.environ["OPENCV_AVFOUNDATION_SKIP_AUTH"] = "1"
+        video_cap = cv2.VideoCapture(0)
+        if not video_cap.isOpened():
+            st.error("Local camera cannot be opened by the background process. Please select 'Browser Webcam (In-Browser Capture)' or 'Benchmark Video Feed'.")
+            st.session_state.is_running = False
+
+    if video_cap is not None and video_cap.isOpened():
+        tracker.reset()
+
+        while st.session_state.is_running and video_cap.isOpened():
+            ret, frame = video_cap.read()
+            if not ret:
+                # Loop video
+                video_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                continue
+
+            fps = fps_calc.tick()
+            detections = detector.track(frame, persist=True)
+            tracker.update(detections)
+
+            annotated = visualizer.draw(frame, detections, tracker, fps)
+            frame_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+
+            video_placeholder.image(frame_rgb, use_container_width=True)
+
+            # Live Telemetry
+            fps_metric.markdown(
+                f"""
+                <div class="metric-card">
+                    <div class="metric-label">Inference FPS</div>
+                    <div class="metric-val" style="color: #10b981;">{fps:.1f}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            active_count = tracker.get_active_count()
+            active_metric.markdown(
+                f"""
+                <div class="metric-card">
+                    <div class="metric-label">Active Tracks</div>
+                    <div class="metric-val">{active_count}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            unique_count = len(tracker.tracks)
+            unique_metric.markdown(
+                f"""
+                <div class="metric-card">
+                    <div class="metric-label">Total Unique Objects</div>
+                    <div class="metric-val">{unique_count}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            if detections:
+                data = [
+                    {
+                        "Track ID": f"#{d.track_id}" if d.track_id is not None else "Unassigned",
+                        "Class": d.class_name,
+                        "Confidence": f"{d.confidence * 100:.1f}%",
+                        "Coordinates": f"({d.box[0]}, {d.box[1]}) -> ({d.box[2]}, {d.box[3]})",
+                    }
+                    for d in detections[:8]
+                ]
+                table_placeholder.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
+
+            time.sleep(0.01)
+
+        video_cap.release()
+else:
+    # Idle view preview
+    if source_mode == "Benchmark Video Feed (Recommended)":
+        preview_cap = cv2.VideoCapture("sample_feed.mp4")
+        if preview_cap.isOpened():
+            ret, frame = preview_cap.read()
+            if ret:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                video_placeholder.image(frame_rgb, caption="Benchmark feed ready. Click 'Start Inference Stream' to run.", use_container_width=True)
+            preview_cap.release()
