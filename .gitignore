@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C libraries and virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Model weights & test artifacts
+*.pt
+*.onnx
+*.engine
+sample_traffic.mp4
+output.mp4
+runs/
+.DS_Store
+.idea/
+.vscode/
